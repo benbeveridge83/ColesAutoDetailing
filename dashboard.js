@@ -2,7 +2,7 @@ import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {supabaseUrl,supabasePublishableKey} from './supabase-config.js';
 const db=createClient(supabaseUrl,supabasePublishableKey);
 const $=id=>document.getElementById(id);
-let services=[],customers=[],jobs=[],leads=[],photos=[],settings=null,staff=false,pendingCommand=null;
+let services=[],customers=[],jobs=[],leads=[],photos=[],paymentRequests=[],settings=null,staff=false,pendingCommand=null;
 const say=message=>{$('status').textContent=message};
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value)||0);
 function el(tag,txt,cls){const e=document.createElement(tag);if(txt!=null)e.textContent=txt;if(cls)e.className=cls;return e;}
@@ -38,19 +38,20 @@ $('loginForm').onsubmit=async ev=>{
 $('signout').onclick=async()=>{await db.auth.signOut();staff=false;await refreshSession()};
 async function refreshAll(){
  if(!staff)return;
- const [l,c,j,s,p,b]=await Promise.all([
+ const [l,c,j,s,p,b,q]=await Promise.all([
  db.from('leads').select('*').order('created_at',{ascending:false}).limit(200),
  db.from('customers').select('*').order('created_at',{ascending:false}).limit(300),
  db.from('jobs').select('*').order('created_at',{ascending:false}).limit(300),
  db.from('services').select('*').order('sort_order').limit(100),
  db.from('gallery').select('*').order('sort_order').limit(100),
  db.from('business_settings').select('*').eq('id',true).maybeSingle(),
+ db.from('payment_requests').select('*').order('created_at',{ascending:false}).limit(300),
  ]);
- for(const x of [l,c,j,s,p,b])if(x.error){say('Some data could not load: '+x.error.message);console.error(x.error.code);return;}
- [leads,customers,jobs,services,photos,settings]=[l.data,c.data,j.data,s.data,p.data,b.data];
+ for(const x of [l,c,j,s,p,b,q])if(x.error){say('Some data could not load: '+x.error.message);console.error(x.error.code);return;}
+ [leads,customers,jobs,services,photos,settings,paymentRequests]=[l.data,c.data,j.data,s.data,p.data,b.data,q.data];
  $('newLeads').textContent=leads.filter(x=>x.status==='new').length;
  $('openJobs').textContent=jobs.filter(x=>!['completed','paid','cancelled'].includes(x.status)).length;
- $('totalPaid').textContent=money(jobs.reduce((sum,x)=>sum+Number(x.amount_paid||0),0));
+ $('totalPaid').textContent=money(jobs.reduce((sum,x)=>sum+Number(x.amount_paid||0)+Number(x.stripe_paid_cents||0)/100,0));
  opts($('jobCustomer'),customers);
  opts($('jobService'),services,'Custom service');
  const req=$('requestList');req.replaceChildren();
@@ -59,10 +60,49 @@ async function refreshAll(){
  [['Mark contacted',()=>update('leads',l.id,{status:'contacted'}),'secondary'],
  ['Mark quoted',()=>update('leads',l.id,{status:'quoted'}),'secondary'],
  ['Create customer',async()=>{await insert('customers',{name:l.name,phone:l.phone,email:l.email});showTab('customers')},'secondary']]);
+
  const jobsEl=$('jobList');jobsEl.replaceChildren();
- for(const j of jobs)listRow(jobsEl,(customers.find(x=>x.id===j.customer_id)?.name||'Customer')+' — '+(j.service_description||services.find(x=>x.id===j.service_id)?.title||'Job'),
-  j.status+' · '+money(j.price)+' quoted · '+money(j.amount_paid)+' recorded paid · '+(j.scheduled_for?new Date(j.scheduled_for).toLocaleString():'Unscheduled')+(j.recurring_interval_days?' · every '+j.recurring_interval_days+' days':''),
- [['Mark completed',()=>update('jobs',j.id,{status:'completed'}),'secondary'],['Mark paid',()=>{if(Number(j.amount_paid||0)<Number(j.price||0))return alert('Record received payment first. Do not mark unpaid jobs paid.');update('jobs',j.id,{status:'paid'})},'secondary'],['Edit payment',()=>editJob(j),'secondary']]);
+ if(!jobs.length)jobsEl.append(el('p','No jobs yet. Add one above to create a custom payment request.'));
+ for(const j of jobs){
+   const customer=customers.find(x=>x.id===j.customer_id);
+   const paid=Number(j.amount_paid||0)+Number(j.stripe_paid_cents||0)/100;
+   const outstanding=Math.max(0,Number(j.price||0)-paid);
+   const actions=[
+     ['Mark completed',()=>update('jobs',j.id,{status:'completed'}),'secondary'],
+     ['Edit quote',()=>editJobPrice(j),'secondary'],
+     ['Record cash / offline',()=>editJob(j),'secondary'],
+   ];
+   if(j.price!==null&&outstanding>=0.50&&j.status!=='cancelled')
+     actions.push(['Create Stripe link',()=>createStripeCheckout(j),'secondary']);
+   if(j.price!==null&&paid>=Number(j.price)&&j.status!=='paid')
+     actions.push(['Mark paid (offline)',()=>update('jobs',j.id,{status:'paid'}),'secondary']);
+   listRow(jobsEl,(customer?.name||'Customer')+' — '+(j.service_description||services.find(x=>x.id===j.service_id)?.title||'Job'),
+    'Status: '+j.status+' · Quote: '+(j.price==null?'Not set':money(j.price))+
+    ' · Offline: '+money(j.amount_paid)+' · Stripe: '+money(Number(j.stripe_paid_cents||0)/100)+
+    ' · Unpaid: '+(j.price==null?'Quote needed':money(outstanding))+
+    ' · '+(j.scheduled_for?new Date(j.scheduled_for).toLocaleString():'Unscheduled')+
+    (j.recurring_interval_days?' · every '+j.recurring_interval_days+' days':''),
+    actions);
+ }
+ const paymentsEl=$('paymentHistory');paymentsEl.replaceChildren();
+ if(!paymentRequests.length)paymentsEl.append(el('p','No Stripe checkouts created yet.'));
+ for(const payment of paymentRequests){
+   const j=jobs.find(x=>x.id===payment.job_id);
+   const c=customers.find(x=>x.id===j?.customer_id);
+   const status=(payment.status==='open' && payment.expires_at && new Date(payment.expires_at)<new Date())
+     ? 'expired (awaiting update)' :payment.status;
+   const actions=[];
+   if(payment.status==='open' && payment.checkout_url && (!payment.expires_at||new Date(payment.expires_at)>new Date())){
+     actions.push(['Copy link',()=>copyLink(payment.checkout_url),'secondary']);
+     actions.push(['Text link',()=>textPaymentLink(c,payment.checkout_url,payment.amount_cents),'secondary']);
+     actions.push(['Email link',()=>emailPaymentLink(c,payment.checkout_url,payment.amount_cents),'secondary']);
+   }
+   listRow(paymentsEl,(c?.name||'Customer')+' · '+money(payment.amount_cents/100),
+      status+' · Created '+new Date(payment.created_at).toLocaleString()+
+      (payment.paid_at?' · Paid '+new Date(payment.paid_at).toLocaleString():'')+
+      (Number(payment.refunded_cents)>0?' · Refunded '+money(payment.refunded_cents/100):''),
+      actions);
+ }
  const customerEl=$('customerList');customerEl.replaceChildren();
  for(const c of customers)listRow(customerEl,c.name,(c.phone||'')+' · '+(c.email||'')+' · '+(c.address||''),[['Edit',()=>editCustomer(c),'secondary']]);
  const serviceEl=$('serviceList');serviceEl.replaceChildren();
@@ -104,6 +144,43 @@ function editJob(j){
  const val=Number(amount);if(!Number.isFinite(val)||val<0)return alert('Invalid payment.');
  const method=prompt('How was the payment made? (Cash, Card, Other)',j.payment_method||'');if(method===null)return;
  update('jobs',j.id,{amount_paid:val,payment_method:method||null});
+}
+
+function editJobPrice(j){
+ const value=prompt('Custom job price ($). Existing Stripe links must expire before changing this.',j.price??'');
+ if(value===null)return;
+ const dollars=Number(value);
+ if(value.trim()===''||!Number.isFinite(dollars)||dollars<0||Math.round(dollars*100)!==dollars*100 && Math.abs(Math.round(dollars*100)-dollars*100)>1e-8)
+   return alert('Enter a valid dollar amount with up to two decimal places.');
+ update('jobs',j.id,{price:dollars});
+}
+async function createStripeCheckout(j){
+ if(!confirm('Create a Stripe checkout for the unpaid balance of this job? The customer must receive the link before payment can happen.'))return;
+ say('Creating a secure Stripe checkout…');
+ const {data,error}=await db.functions.invoke('stripe-create-checkout',{body:{job_id:j.id}});
+ if(error){
+   let message='Stripe is not fully connected yet. Please check the payment setup.';
+   try{const detail=await error.context?.json?.();if(detail?.error)message=detail.error}catch{}
+   say(message);return;
+ }
+ if(!data?.checkout_url){say('Stripe did not return a payment link.');return;}
+ await refreshAll();
+ say((data.existing?'Existing':'New')+' Stripe link ready for '+money(data.amount_cents/100)+'. Choose Copy, Text, or Email under Stripe checkout history.');
+}
+async function copyLink(link){
+ try{await navigator.clipboard.writeText(link);say('Payment link copied.')}catch{prompt('Copy this secure Stripe link:',link)}
+}
+function textPaymentLink(c,link,cents){
+ const message="Cole's Auto Detailing: your payment of "+money(cents/100)+" is ready. Pay securely here: "+link;
+ const number=(c?.phone||'').replace(/[^+\d]/g,'');
+ window.location.href='sms:'+number+'?body='+encodeURIComponent(message);
+ say('A text message draft opened. Please press Send in your messaging app.');
+}
+function emailPaymentLink(c,link,cents){
+ const subject="Cole's Auto Detailing — Payment for your service";
+ const body="Hello "+(c?.name||'')+",\n\nThank you for choosing Cole's Auto Detailing. Your payment of "+money(cents/100)+" is ready.\n\nPay securely with Stripe: "+link+"\n\nThank you!";
+ window.location.href='mailto:'+encodeURIComponent(c?.email||'')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+ say('An email draft opened. Please send it from your email app.');
 }
 function proposeCommand(text){
  let m;
