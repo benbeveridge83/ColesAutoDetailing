@@ -184,7 +184,7 @@ function emailPaymentLink(c,link,cents){
 }
 function proposeCommand(text){
  let m;
- if((m=/^add service\s+(.+)$/i.exec(text)))return {description:'Add a new service named “‘+m[1]+'” to the website.',run:()=>insert('services',{title:m[1].slice(0,100),description:'',sort_order:services.length*10+10})};
+ if((m=/^add service\s+(.+)$/i.exec(text)))return {description:'Add a new service named "'+m[1]+'" to the website.',run:()=>insert('services',{title:m[1].slice(0,100),description:'',sort_order:services.length*10+10})};
  if((m=/^change phone to\s+([+\d\s().-]{7,30})$/i.exec(text)))return {description:'Update the public website phone number to '+m[1]+'.',run:async()=>{const {error}=await db.from('business_settings').update({phone:m[1]}).eq('id',true);if(error){say(error.message);return;}say('Phone updated.');await refreshAll();}};
  if(/^show (requests|leads)$/i.test(text))return {description:'Open customer requests (no data changed).',run:async()=>showTab('requests')};
  return null;
