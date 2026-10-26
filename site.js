@@ -41,11 +41,9 @@ async function loadPublicData(){
     const b=settingsResult.data;
     const phoneDigits=String(b.phone||'(832) 877-5556').replace(/[^+\d]/g,'');
     document.querySelectorAll('a[href^="tel:"]').forEach(a=>{a.href='tel:'+phoneDigits;if(a.classList.contains('pill'))a.textContent='CALL PARKER ↗';else if(a.classList.contains('phone-big'))a.textContent=b.phone+' ↗';else if(a.textContent.includes('CALL ('))a.textContent='CALL '+b.phone;});
-    const paymentButton=$('paymentLink'); if(paymentButton && !b.payment_url)paymentButton.href='tel:'+phoneDigits;
+    const paymentButton=$('paymentLink'); if(paymentButton)paymentButton.href='tel:'+phoneDigits;
     const review=$('googleReviewLink');
     if(b.google_review_url){review.href=b.google_review_url;review.hidden=false;}
-    const pay=$('paymentLink');
-    if(b.payment_url){pay.href=b.payment_url;pay.textContent='Pay securely online ↗';pay.target='_blank';pay.rel='noopener noreferrer';}
   }
   if(servicesResult.data)renderServices(servicesResult.data);
   if(photosResult.data && photosResult.data.length){
