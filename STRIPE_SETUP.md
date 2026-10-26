@@ -13,10 +13,10 @@ Parker determines the price of each job. The website calculates payment amount o
 
 ## Steps to activate
 
-1. Deploy GitHub repository benbeveridge83/ColesAutoDetailing as a static website to Vercel. Save its HTTPS .vercel.app base URL. A custom domain can be added later.
+1. Configure GitHub Pages from main / root using the `CNAME` file, and point Bluehost DNS to GitHub Pages for `colesautodetailingtexas.com`. Confirm `https://colesautodetailingtexas.com/` works with HTTPS before enabling Stripe. Keep GitHub Pages as the public host; no Vercel deployment is needed.
 2. Open Supabase Edge Function Secrets: https://supabase.com/dashboard/project/tubskesvgngmmgcicowq/functions/secrets
 3. Add secret STRIPE_SECRET_KEY: the correct Stripe account secret key (start with a Stripe test key, sk_test_...). **Never put this in GitHub or ChatGPT.**
-4. Add secret APP_BASE_URL: the exact deployed HTTPS website base URL without a trailing slash.
+4. Add secret APP_BASE_URL: `https://colesautodetailingtexas.com` (without a trailing slash), only after the live HTTPS domain is working.
 5. In Stripe Dashboard, create a webhook destination for:
 https://tubskesvgngmmgcicowq.supabase.co/functions/v1/stripe-webhook
 6. Subscribe to:
@@ -35,9 +35,11 @@ https://supabase.com/dashboard/project/tubskesvgngmmgcicowq/auth/users
     select id from auth.users where lower(email)=lower('colesautodetailingtx@gmail.com')
     on conflict do nothing;
 
-11. Sign in at your website's /dashboard.html, create a test customer and $35 job, then generate a test Stripe Checkout link.
+11. Sign in at https://colesautodetailingtexas.com/dashboard.html, create a test customer and $35 job, then generate a test Stripe Checkout link.
 12. Use a Stripe test card in test mode, confirm the test payment, and check the job's Stripe paid and status. Test duplicate webhook delivery, expiration and refunds.
 13. When verified, replace with LIVE Stripe keys and the LIVE webhook's signing secret. Do a controlled live test only with the account owner's approval.
+
+Before logging in, update Supabase Authentication > URL Configuration: set the Site URL to `https://colesautodetailingtexas.com` and allow redirects from `https://colesautodetailingtexas.com/**` (plus your www domain if using it). Test Supabase login and quote form after publishing.
 
 ## Security rules and notes
 
