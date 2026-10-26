@@ -134,7 +134,7 @@ $('photoForm').onsubmit=async e=>{e.preventDefault();const file=e.target.element
  if(ok)e.target.reset();
 };
 $('settingsForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);
- const u={business_name:d.business_name,tagline:d.tagline,phone:d.phone,service_area:d.service_area,google_review_url:d.google_review_url||null,payment_url:d.payment_url||null,updated_at:new Date().toISOString()};
+ const u={business_name:d.business_name,tagline:d.tagline,phone:d.phone,service_area:d.service_area,google_review_url:d.google_review_url||null,updated_at:new Date().toISOString()};
  const {error}=await db.from('business_settings').update(u).eq('id',true);if(error){say('Settings not saved: '+error.message);return;}say('Website settings saved.');await refreshAll();
 };
 function editCustomer(c){const name=prompt('Customer name',c.name);if(name===null||!name.trim())return;const phone=prompt('Phone',c.phone||'');if(phone===null)return;update('customers',c.id,{name:name.trim(),phone:phone||null});}
