@@ -1,0 +1,7 @@
+# Checkout uses manual Supabase access-token and staff-membership checks in the function.
+# Webhook uses Stripe-Signature verification; neither endpoint trusts anonymous requests.
+[functions.stripe-create-checkout]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
