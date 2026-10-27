@@ -35,6 +35,7 @@ $('loginForm').onsubmit=async ev=>{
  await refreshSession();
  if(!staff){await db.auth.signOut();alert('This user is not authorized to manage the business. Ask the administrator to add it to staff_users.')}
 };
+$('refreshRequests').onclick=()=>refreshAll().catch(()=>say('Could not refresh submissions. Please try again.'));
 $('signout').onclick=async()=>{await db.auth.signOut();staff=false;await refreshSession()};
 async function refreshAll(){
  if(!staff)return;
@@ -47,6 +48,7 @@ async function refreshAll(){
  db.from('business_settings').select('*').eq('id',true).maybeSingle(),
  db.from('payment_requests').select('*').order('created_at',{ascending:false}).limit(300),
  ]);
+ if(l.error){$('requestList').textContent='Could not load submissions. Use Refresh submissions to try again.';}else{leads=l.data||[];$('newLeads').textContent=leads.filter(x=>x.status==='new').length;renderSubmissions();}
  for(const x of [l,c,j,s,p,b,q])if(x.error){say('Some data could not load: '+x.error.message);console.error(x.error.code);return;}
  [leads,customers,jobs,services,photos,settings,paymentRequests]=[l.data,c.data,j.data,s.data,p.data,b.data,q.data];
  $('newLeads').textContent=leads.filter(x=>x.status==='new').length;
@@ -54,12 +56,7 @@ async function refreshAll(){
  $('totalPaid').textContent=money(jobs.reduce((sum,x)=>sum+Number(x.amount_paid||0)+Number(x.stripe_paid_cents||0)/100,0));
  opts($('jobCustomer'),customers);
  opts($('jobService'),services,'Custom service');
- const req=$('requestList');req.replaceChildren();
- if(!leads.length)req.textContent='No requests yet.';
- for(const l of leads)listRow(req,l.name+' · '+l.service_text,l.phone+' · '+(l.email||'No email')+' · '+(l.preferred_date||'Date flexible')+' · '+l.status+' · '+(l.details||'No details'),
- [['Mark contacted',()=>update('leads',l.id,{status:'contacted'}),'secondary'],
- ['Mark quoted',()=>update('leads',l.id,{status:'quoted'}),'secondary'],
- ['Create customer',async()=>{await insert('customers',{name:l.name,phone:l.phone,email:l.email});showTab('customers')},'secondary']]);
+ renderSubmissions();
 
  const jobsEl=$('jobList');jobsEl.replaceChildren();
  if(!jobs.length)jobsEl.append(el('p','No jobs yet. Add one above to create a custom payment request.'));
@@ -111,6 +108,39 @@ async function refreshAll(){
  const photoEl=$('photoList');photoEl.replaceChildren();
  for(const photo of photos){const url=db.storage.from('coles-gallery').getPublicUrl(photo.image_path).data.publicUrl;const row=el('div',null,'item'),img=el('img');img.src=url;img.alt=photo.caption||'Detailing photograph';img.className='thumbnail';row.append(img,el('strong',photo.caption||'Photo'));const b=el('button',photo.visible?'Hide photo':'Publish photo','secondary');b.onclick=()=>update('gallery',photo.id,{visible:!photo.visible});row.append(b);photoEl.append(row);}
  if(settings){const f=$('settingsForm');for(const [k,v] of Object.entries(settings)){if(f.elements[k])f.elements[k].value=v??'';}}
+}
+function renderSubmissions(){
+ const req=$('requestList');req.replaceChildren();
+ $('requestSummary').textContent=leads.length+' submission'+(leads.length===1?'':'s')+' shown'+(leads.length===200?' (latest 200)':'')+'.';
+ if(!leads.length){req.append(el('p','No form submissions yet. New inquiries will appear here.'));return;}
+ for(const lead of leads){
+  const row=el('article',null,'item');
+  row.append(el('strong',lead.name+' · '+lead.service_text));
+  const meta=el('p',null,'submission-meta');
+  const submitted=new Date(lead.created_at).toLocaleString('en-US',{timeZone:'America/Chicago'});
+  meta.append(el('span','Submitted: '+submitted+' (Central) · Status: '+lead.status),el('br'));
+  const phone=el('a',lead.phone);phone.href='tel:'+lead.phone.replace(/[^+\d]/g,'');meta.append(phone);
+  if(lead.email){const email=el('a',lead.email);email.href='mailto:'+encodeURIComponent(lead.email);meta.append(document.createTextNode(' · '),email);}
+  meta.append(el('br'),el('span','Preferred date: '+(lead.preferred_date||'Flexible')));
+  row.append(meta,el('p',lead.details||'No additional message.','submission-message'));
+  for(const [label,handler] of [
+   ['Mark contacted',()=>update('leads',lead.id,{status:'contacted'})],
+   ['Mark quoted',()=>update('leads',lead.id,{status:'quoted'})],
+   ['Create customer',async()=>{if(await insert('customers',{name:lead.name,phone:lead.phone,email:lead.email}))showTab('customers')}],
+  ]){const button=el('button',label,'secondary');button.type='button';button.onclick=handler;row.append(button);}
+  const delivery=el('p','Email and text alerts: checking status…','muted');delivery.id='alerts-'+lead.id;row.append(delivery);
+  req.append(row);
+ }
+ loadAlertStatus().catch(()=>{});
+}
+async function loadAlertStatus(){
+ const {data,error}=await db.from('lead_notifications').select('lead_id,channel,status').in('lead_id',leads.map(x=>x.id));
+ const labels={pending:'queued (service setup may be pending)',processing:'sending',accepted:'accepted by provider',failed:'not sent — needs attention',unknown:'delivery uncertain — check provider'};
+ for(const lead of leads){const target=$('alerts-'+lead.id);if(!target)continue;
+  if(error){target.textContent='Alert status unavailable. The submission is saved.';continue;}
+  const rows=(data||[]).filter(x=>x.lead_id===lead.id);
+  target.textContent=rows.length?rows.map(x=>(x.channel==='email'?'Email':'Text')+': '+(labels[x.status]||x.status)).join(' · '):'Email/text alerts are not queued for this older submission.';
+ }
 }
 async function insert(table,payload){
  const {error}=await db.from(table).insert(payload);
@@ -199,3 +229,4 @@ $('mic').onclick=()=>{
 };
 db.auth.onAuthStateChange(()=>{setTimeout(()=>refreshSession().catch(e=>console.error(e)),0)});
 refreshSession().catch(()=>{$('login').classList.remove('hidden');$('office').classList.add('hidden')});
+

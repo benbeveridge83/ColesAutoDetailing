@@ -28,3 +28,8 @@ Publish the `main` branch from `/ (root)` using **GitHub Pages**. The custom dom
 ## Database
 
 Supabase migrations already applied: initial_site_and_business_tables, isolate_staff_check_from_public_rpc, stripe_per_job_checkout_ledger. Initial schema reference is in [supabase/schema.sql](supabase/schema.sql).
+
+
+## Password recovery and alerts
+
+See [ACCOUNT_AND_ALERTS_SETUP.md](ACCOUNT_AND_ALERTS_SETUP.md) for the remaining account, authentication email, Resend, and Twilio configuration. Form submissions are saved even while alert services are awaiting setup.
