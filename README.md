@@ -6,7 +6,7 @@ Parker's **Midnight Shine** website and customer-management dashboard. GitHub so
 
 ## Status
 
-- Public website: services, gallery, customer inquiries, Google review-link placeholder, and customer-specific payment guidance.
+- Public website: services, gallery, customer inquiries, customer-specific payment guidance, and an optional official Google Maps Places UI Kit live reviews component. Google reviews stay dormant until Parker saves his exact Place ID and a restricted browser key. See [GOOGLE_REVIEWS_SETUP.md](GOOGLE_REVIEWS_SETUP.md).
 - Dashboard: password login with staff authorization; leads, customers, appointments, manually recorded offline payments, services, and photos.
 - **Stripe custom-job checkout is implemented**, including authenticated Checkout link generation, record of outstanding balance, payment-history actions, webhook-backed payment settlement, refunds, and duplicate-event protection.
 - **Not accepting real card payments yet:** Stripe account secrets, signing secret, and live website URL must be supplied through Supabase Edge Function Secrets. Read [STRIPE_SETUP.md](STRIPE_SETUP.md).
@@ -23,7 +23,7 @@ Publish the `main` branch from `/ (root)` using **GitHub Pages**. The custom dom
 - Individual custom Checkout amounts are determined on the server from job records. Never rely on browser amounts or redirect pages to confirm a transaction.
 - The site opens text and email drafts; it does not automatically transmit customer messages.
 - The public quote form should receive CAPTCHA/rate limiting and privacy notices before active promotion.
-- Review and photograph rights, Stripe account eligibility, and tax treatment before processing real payments.
+- Review and photograph rights, Stripe account eligibility, Google Maps Platform billing and API terms, and tax treatment before processing real payments.
 
 ## Database
 
