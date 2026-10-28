@@ -1,5 +1,6 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {supabaseUrl,supabasePublishableKey} from './supabase-config.js';
+import {optimizePhoto,displayBytes} from './photo-tools.js';
 const db=createClient(supabaseUrl,supabasePublishableKey);
 const $=id=>document.getElementById(id);
 let services=[],customers=[],jobs=[],leads=[],photos=[],paymentRequests=[],settings=null,staff=false,pendingCommand=null;
@@ -172,13 +173,94 @@ $('jobForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);if(!
  if(await insert('jobs',payload))e.target.reset();
 };
 $('serviceForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);if(await insert('services',{title:d.title.trim(),description:d.description||'',price_from:d.price_from||null,sort_order:services.length*10+10}))e.target.reset()};
-$('photoForm').onsubmit=async e=>{e.preventDefault();const file=e.target.elements.photo.files[0];if(!file)return;
- if(file.size>5242880||!['image/png','image/jpeg','image/webp'].includes(file.type)){say('Please upload a JPG, PNG, or WebP under 5 MB.');return;}
- const path=crypto.randomUUID()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
- say('Uploading photo…');const {error}=await db.storage.from('coles-gallery').upload(path,file,{contentType:file.type,upsert:false});
- if(error){say('Upload failed: '+error.message);return;}
- const ok=await insert('gallery',{image_path:path,caption:e.target.elements.caption.value,sort_order:photos.length*10+10});
- if(ok)e.target.reset();
+
+let optimizedPhoto=null,previewPhotoUrl=null,photoBusy=false;
+const photoSettings=()=>({
+  aspect:$('photoCrop').value,
+  offsetX:Number($('photoCropX').value)/100,
+  offsetY:Number($('photoCropY').value)/100,
+  maxDimension:Number($('photoDimension').value)
+});
+function invalidatePhoto(){
+  optimizedPhoto=null;
+  if(previewPhotoUrl){URL.revokeObjectURL(previewPhotoUrl);previewPhotoUrl=null;}
+  $('photoEditorPreview').hidden=true;
+  $('photoPreviewImage').removeAttribute('src');
+  $('photoOptimizedInfo').textContent='';
+}
+for(const id of ['photoFile','photoCrop','photoCropX','photoCropY','photoDimension']){
+  $(id).addEventListener(id==='photoFile'?'change':'input',()=>{
+    if(!photoBusy)invalidatePhoto();
+  });
+}
+async function preparePhoto(){
+  if(photoBusy)return null;
+  const file=$('photoFile').files[0];
+  if(!file){$('photoStatus').textContent='Choose a photo first.';return null;}
+  const options=photoSettings();
+  const signature=[file.name,file.size,file.lastModified,JSON.stringify(options)].join('|');
+  if(optimizedPhoto?.signature===signature)return optimizedPhoto.result;
+  photoBusy=true;
+  $('photoPreviewBtn').disabled=true;
+  $('photoUploadBtn').disabled=true;
+  $('photoStatus').textContent='Optimizing photo on your device…';
+  try{
+    const result=await optimizePhoto(file,options);
+    invalidatePhoto();
+    previewPhotoUrl=URL.createObjectURL(result.file);
+    $('photoPreviewImage').src=previewPhotoUrl;
+    $('photoEditorPreview').hidden=false;
+    $('photoOptimizedInfo').textContent='Original: '+displayBytes(result.originalBytes)+
+      ' → optimized: '+displayBytes(result.optimizedBytes)+
+      ' ('+result.width+' × '+result.height+' pixels). Location/EXIF metadata removed.';
+    $('photoStatus').textContent='Photo is ready to publish.';
+    optimizedPhoto={signature,result};
+    return result;
+  }catch(error){
+    $('photoStatus').textContent=error?.message||'Could not process this photo. Please try another image.';
+    return null;
+  }finally{
+    photoBusy=false;
+    $('photoPreviewBtn').disabled=false;
+    $('photoUploadBtn').disabled=false;
+  }
+}
+$('photoPreviewBtn').onclick=()=>{void preparePhoto()};
+$('photoForm').onsubmit=async event=>{
+  event.preventDefault();
+  const optimized=await preparePhoto();
+  if(!optimized||photoBusy)return;
+  photoBusy=true;
+  $('photoUploadBtn').disabled=true;
+  $('photoPreviewBtn').disabled=true;
+  const path=crypto.randomUUID()+'.jpg';
+  try{
+    $('photoStatus').textContent='Uploading '+displayBytes(optimized.optimizedBytes)+' to the website…';
+    const {error}=await db.storage.from('coles-gallery').upload(path,optimized.file,{
+      contentType:'image/jpeg',upsert:false,cacheControl:'3600'
+    });
+    if(error)throw new Error('Upload failed: '+error.message);
+    const {error:rowError}=await db.from('gallery').insert({
+      image_path:path,caption:String(event.target.elements.caption.value||'').slice(0,200),
+      sort_order:photos.length*10+10
+    });
+    if(rowError){
+      // Try not to leave orphaned images on failure.
+      await db.storage.from('coles-gallery').remove([path]);
+      throw new Error('Could not add the photo to your gallery: '+rowError.message);
+    }
+    event.target.reset();
+    invalidatePhoto();
+    await refreshAll();
+    $('photoStatus').textContent='Photo uploaded and published! It will appear on the website gallery.';
+    say('Photo added successfully.');
+  }catch(error){
+    $('photoStatus').textContent=error?.message||'Upload failed. Please try again.';
+  }finally{
+    photoBusy=false;
+    $('photoUploadBtn').disabled=false;
+    $('photoPreviewBtn').disabled=false;
+  }
 };
 $('settingsForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);
  const u={business_name:d.business_name,tagline:d.tagline,phone:d.phone,service_area:d.service_area,google_review_url:d.google_review_url||null,google_place_id:d.google_place_id||null,google_maps_browser_key:d.google_maps_browser_key||null,updated_at:new Date().toISOString()};
