@@ -25,6 +25,16 @@ Publish the `main` branch from `/ (root)` using **GitHub Pages**. The custom dom
 - The public quote form should receive CAPTCHA/rate limiting and privacy notices before active promotion.
 - Review and photograph rights, Stripe account eligibility, Google Maps Platform billing and API terms, and tax treatment before processing real payments.
 
+## Calendar and customer messages
+
+Parker's dashboard now includes a built-in Central-time job calendar, month/week navigation, edit/schedule jobs, repeat-visit suggestions, upcoming reminders and downloadable calendar alerts. The Jobs and Calendar views also offer a single customer text composer that can combine a job reminder, Stripe link, and honest Google review link into one message.
+
+Customers' separate service-text and review-invitation opt-in records are enforced. The website **opens SMS drafts** and provides Copy Message; actual sending still requires Parker to press Send. Fully automatic sending requires a configured SMS provider, A2P registration where applicable, and opt-out handling.
+
+The Photos tab automatically resizes/compresses overlarge images with crop preview and strips embedded GPS metadata.
+
+**Setup and testing details:** [CALENDAR_AND_TEXT_SETUP.md](CALENDAR_AND_TEXT_SETUP.md). Run Node 22 tests via `npm test`; GitHub Actions now checks date and image-crop logic on pushes.
+
 ## Database
 
 Supabase migrations already applied: initial_site_and_business_tables, isolate_staff_check_from_public_rpc, stripe_per_job_checkout_ledger. Initial schema reference is in [supabase/schema.sql](supabase/schema.sql).
