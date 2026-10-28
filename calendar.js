@@ -68,8 +68,14 @@ function saveIcs(entry,customer,title){
    (customer?'. Customer: '+customer.name+'. Phone: '+(customer.phone||'')+'.':'')),
   'STATUS:CONFIRMED');
  if(customer?.address)lines.push('LOCATION:'+icsEncode(customer.address));
- if(alarm>0&&start)lines.push('BEGIN:VALARM','ACTION:DISPLAY','TRIGGER:-PT'+alarm+'M',
-  'DESCRIPTION:Upcoming calendar event','END:VALARM');
+ if(alarm>0){
+   // An all-day entry has no start time. Anchor its reminder to 9am Central.
+   const reminderAnchor=start||new Date(centralToUtcISO(d,'09:00'));
+   const trigger=start?'TRIGGER:-PT'+alarm+'M':
+     'TRIGGER;VALUE=DATE-TIME:'+icsUtc(new Date(reminderAnchor.getTime()-alarm*60000));
+   lines.push('BEGIN:VALARM','ACTION:DISPLAY',trigger,
+     'DESCRIPTION:Upcoming calendar event','END:VALARM');
+ }
  lines.push('END:VEVENT','END:VCALENDAR','');
  const blob=new Blob([lines.join('\r\n')],{type:'text/calendar;charset=utf-8'});
  const url=URL.createObjectURL(blob),a=document.createElement('a');
@@ -225,8 +231,11 @@ export function initCalendar({db,getJobs,getEvents,getCustomers,getServices,refr
      if(item.reminder_minutes_before==null||item.reminder_handled_at||
        item.kind==='job'&&['cancelled','completed','paid'].includes(item.status))return false;
      const start=entryStart(item);
-     if(!start)return false; // Untimed entries are all-day; there is no exact alarm time.
-     const time=start.getTime();
+     const calendarDay=entryDate(item);
+     if(!start&&!calendarDay)return false;
+     // All-day entries can be reminders too: use 9am Central for their alert clock.
+     const anchor=start||new Date(centralToUtcISO(calendarDay,'09:00'));
+     const time=anchor.getTime();
      return time>=now-24*3600000&&time<=now+14*86400000&&now>=time-item.reminder_minutes_before*60000;
    }).sort((a,b)=>entryStart(a)-entryStart(b));
    if(!due.length)box.append(textNode('p','No reminders currently due.'));
@@ -350,7 +359,7 @@ export function initCalendar({db,getJobs,getEvents,getCustomers,getServices,refr
        const payload={
          title:title||'Event',event_date:date,event_time:time,
          customer_id:customerId,duration_minutes:duration,
-         reminder_minutes_before:time&&f.elements.reminder_minutes_before.value?
+         reminder_minutes_before:f.elements.reminder_minutes_before.value?
            Number(f.elements.reminder_minutes_before.value):null,
          notes:f.elements.notes.value.trim()||null
        };
@@ -361,7 +370,7 @@ export function initCalendar({db,getJobs,getEvents,getCustomers,getServices,refr
        const payload={
          customer_id:customerId,service_id:f.elements.service_id.value||null,
          service_description:title||null,calendar_date:date,scheduled_for:startISO,
-         duration_minutes:duration,reminder_minutes_before:time&&f.elements.reminder_minutes_before.value?
+         duration_minutes:duration,reminder_minutes_before:f.elements.reminder_minutes_before.value?
            Number(f.elements.reminder_minutes_before.value):null,
          recurring_interval_days:f.elements.recurring_interval_days.value?
            Number(f.elements.recurring_interval_days.value):null,
