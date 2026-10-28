@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {centralToUtcISO,dayKey,shiftDays,startOfWeek} from '../calendar.js';
+import {centralToUtcISO,dayKey,shiftDays,startOfWeek,entryDate,entryStart} from '../calendar.js';
 import {computeCrop,displayBytes,UPLOAD_LIMIT} from '../photo-tools.js';
 
 test('Central Time converts summer and winter hours correctly',()=>{
@@ -40,4 +40,24 @@ test('Portrait photo crop gives expected aspect ratio',()=>{
 test('File sizes and 5 MB upload limit are explicit',()=>{
   assert.equal(displayBytes(2*1024*1024),'2.00 MB');
   assert.equal(UPLOAD_LIMIT,5242880);
+});
+
+test('A job without customer or scheduled start still appears on selected calendar day',()=>{
+  const item={kind:'job',customer_id:null,calendar_date:'2026-10-27',scheduled_for:null,
+    service_description:null};
+  assert.equal(entryDate(item),'2026-10-27');
+  assert.equal(entryStart(item),null);
+});
+test('General event without customer or time is a valid all-day entry',()=>{
+  const item={kind:'event',customer_id:null,title:'Event',event_date:'2026-11-03',event_time:null};
+  assert.equal(entryDate(item),'2026-11-03');
+  assert.equal(entryStart(item),null);
+});
+test('An optional-time event still uses Central Time when one is provided',()=>{
+  const item={kind:'event',customer_id:null,title:'Supplies',event_date:'2026-11-03',event_time:'10:30:00'};
+  assert.equal(entryStart(item).toISOString(),'2026-11-03T16:30:00.000Z');
+});
+test('Older scheduled jobs appear on the calendar without a new date column populated',()=>{
+  const item={kind:'job',calendar_date:null,scheduled_for:'2026-11-03T16:30:00.000Z'};
+  assert.equal(entryDate(item),'2026-11-03');
 });
