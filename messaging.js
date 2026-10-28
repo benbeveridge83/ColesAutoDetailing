@@ -82,6 +82,10 @@ export function initMessaging({db,getJobs,getCustomers,getPayments,getSettings,r
       inputs[type].disabled=!active;
       if(!active)inputs[type].checked=false;
     }
+    const createButton=$('smsGeneratePaymentBtn');
+    const needsPayment=job.price!=null&&balance(job)>=.5&&job.status!=='cancelled'&&!latestPayLink(job);
+    createButton.hidden=!needsPayment;
+    createButton.disabled=!hasConsent(customer,'payment')||!getPhone(customer);
     const message=compose(job,customer);
     $('smsMessagePreview').value=message||'Choose an available item above to prepare a message.';
     box.textContent=explanations.join(' ')||'The message is only a draft until Parker sends it from his texting app.';
@@ -132,6 +136,27 @@ export function initMessaging({db,getJobs,getCustomers,getPayments,getSettings,r
       say('Text draft opened for '+customer.name+'. Parker must press Send in the messaging app.');
     }
   }
+  $('smsGeneratePaymentBtn').onclick=async()=>{
+    const {job,customer}=current();
+    if(!job||!customer||!hasConsent(customer,'payment'))return;
+    const button=$('smsGeneratePaymentBtn');button.disabled=true;
+    $('smsComposerGuidance').textContent='Generating the secure payment link…';
+    try{
+      const {data,error}=await db.functions.invoke('stripe-create-checkout',{body:{job_id:job.id}});
+      if(error){
+        let message='Stripe is not yet configured. Ask the administrator to complete Stripe setup.';
+        try{const details=await error.context?.json?.();if(details?.error)message=details.error}catch{}
+        $('smsComposerGuidance').textContent=message;
+        return;
+      }
+      if(!data?.checkout_url)throw new Error('Stripe did not return a checkout link.');
+      await refreshAll();
+      inputs.payment.checked=true;
+      updatePreview();
+      say('Secure payment link ready and selected. Review the combined text, then open the texting app.');
+    }catch(e){$('smsComposerGuidance').textContent=e?.message||'Could not create payment link.';}
+    finally{button.disabled=false;}
+  };
   $('smsClose').onclick=()=>dialog.close();
   $('smsCopyText').onclick=()=>{void act('copy')};
   $('smsOpenDraft').onclick=()=>{void act('open_draft')};
