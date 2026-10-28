@@ -5,7 +5,7 @@ import {initCalendar} from './calendar.js';
 import {initMessaging} from './messaging.js';
 const db=createClient(supabaseUrl,supabasePublishableKey);
 const $=id=>document.getElementById(id);
-let services=[],customers=[],jobs=[],leads=[],photos=[],paymentRequests=[],settings=null,staff=false,pendingCommand=null;
+let services=[],customers=[],jobs=[],calendarEvents=[],leads=[],photos=[],paymentRequests=[],settings=null,staff=false,pendingCommand=null;
 let calendar,messaging;
 const say=message=>{$('status').textContent=message};
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value)||0);
@@ -60,7 +60,7 @@ $('forgotPassword').onclick=async()=>{
 $('signout').onclick=async()=>{await db.auth.signOut();staff=false;await refreshSession()};
 async function refreshAll(){
  if(!staff)return;
- const [l,c,j,s,p,b,q]=await Promise.all([
+ const [l,c,j,s,p,b,q,v]=await Promise.all([
  db.from('leads').select('*').order('created_at',{ascending:false}).limit(200),
  db.from('customers').select('*').order('created_at',{ascending:false}).limit(300),
  db.from('jobs').select('*').order('created_at',{ascending:false}).limit(300),
@@ -68,10 +68,11 @@ async function refreshAll(){
  db.from('gallery').select('*').order('sort_order').limit(100),
  db.from('business_settings').select('*').eq('id',true).maybeSingle(),
  db.from('payment_requests').select('*').order('created_at',{ascending:false}).limit(300),
+ db.from('calendar_events').select('*').order('event_date',{ascending:true}).limit(1000),
  ]);
  if(l.error){$('requestList').textContent='Could not load submissions. Use Refresh submissions to try again.';}else{leads=l.data||[];$('newLeads').textContent=leads.filter(x=>x.status==='new').length;renderSubmissions();}
- for(const x of [l,c,j,s,p,b,q])if(x.error){say('Some data could not load: '+x.error.message);console.error(x.error.code);return;}
- [leads,customers,jobs,services,photos,settings,paymentRequests]=[l.data,c.data,j.data,s.data,p.data,b.data,q.data];
+ for(const x of [l,c,j,s,p,b,q,v])if(x.error){say('Some data could not load: '+x.error.message);console.error(x.error.code);return;}
+ [leads,customers,jobs,services,photos,settings,paymentRequests,calendarEvents]=[l.data,c.data,j.data,s.data,p.data,b.data,q.data,v.data];
  $('newLeads').textContent=leads.filter(x=>x.status==='new').length;
  $('openJobs').textContent=jobs.filter(x=>!['completed','paid','cancelled'].includes(x.status)).length;
  $('totalPaid').textContent=money(jobs.reduce((sum,x)=>sum+Number(x.amount_paid||0)+Number(x.stripe_paid_cents||0)/100,0));
@@ -89,18 +90,18 @@ async function refreshAll(){
      ['Mark completed',()=>update('jobs',j.id,{status:'completed'}),'secondary'],
      ['Edit quote',()=>editJobPrice(j),'secondary'],
      ['Record cash / offline',()=>editJob(j),'secondary'],
-    ['Send Text',()=>messaging?.openForJob(j),'secondary'],
-    ['Calendar',()=>{showTab('calendar');if(j.scheduled_for)calendar?.editJob(j);else say('Add a scheduled time for this job to appear on the calendar.');},'secondary'],
+     ...(customer?[['Send Text',()=>messaging?.openForJob(j),'secondary']]:[]),
+    ['Calendar',()=>{showTab('calendar');calendar?.editJob(j);},'secondary'],
    ];
-   if(j.price!==null&&outstanding>=0.50&&j.status!=='cancelled')
+   if(customer&&j.price!==null&&outstanding>=0.50&&j.status!=='cancelled')
      actions.push(['Create Stripe link',()=>createStripeCheckout(j),'secondary']);
    if(j.price!==null&&paid>=Number(j.price)&&j.status!=='paid')
      actions.push(['Mark paid (offline)',()=>update('jobs',j.id,{status:'paid'}),'secondary']);
-   listRow(jobsEl,(customer?.name||'Customer')+' — '+(j.service_description||services.find(x=>x.id===j.service_id)?.title||'Job'),
+   listRow(jobsEl,(customer?.name||'No customer')+' — '+(j.service_description||services.find(x=>x.id===j.service_id)?.title||'Job'),
     'Status: '+j.status+' · Quote: '+(j.price==null?'Not set':money(j.price))+
     ' · Offline: '+money(j.amount_paid)+' · Stripe: '+money(Number(j.stripe_paid_cents||0)/100)+
     ' · Unpaid: '+(j.price==null?'Quote needed':money(outstanding))+
-    ' · '+(j.scheduled_for?new Date(j.scheduled_for).toLocaleString():'Unscheduled')+
+    ' · '+(j.scheduled_for?new Date(j.scheduled_for).toLocaleString():j.calendar_date?'All day '+j.calendar_date:'Unscheduled')+
     (j.recurring_interval_days?' · every '+j.recurring_interval_days+' days':''),
     actions);
  }
@@ -368,7 +369,7 @@ messaging=initMessaging({
  getSettings:()=>settings,refreshAll,say
 });
 calendar=initCalendar({
- db,getJobs:()=>jobs,getCustomers:()=>customers,getServices:()=>services,
+ db,getJobs:()=>jobs,getEvents:()=>calendarEvents,getCustomers:()=>customers,getServices:()=>services,
  refreshAll,openComposer:(job)=>messaging.openForJob(job),say
 });
 db.auth.onAuthStateChange(()=>{setTimeout(()=>refreshSession().catch(e=>console.error(e)),0)});
