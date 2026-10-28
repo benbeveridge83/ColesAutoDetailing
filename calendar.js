@@ -16,8 +16,8 @@ function centralParts(date){
  return {year:Number(p.year),month:Number(p.month),day:Number(p.day),hour:Number(p.hour),minute:Number(p.minute)};
 }
 function pad(n){return String(n).padStart(2,'0')}
-function dayKey(date){const p=centralParts(date);return p.year+'-'+pad(p.month)+'-'+pad(p.day)}
-function centralToUtcISO(day,time){
+export function dayKey(date){const p=centralParts(date);return p.year+'-'+pad(p.month)+'-'+pad(p.day)}
+export function centralToUtcISO(day,time){
  const [y,m,d]=day.split('-').map(Number),[hour,minute]=time.split(':').map(Number);
  if(!y||!m||!d||hour<0||hour>23||minute<0||minute>59)throw new Error('Enter a valid job date and time.');
  const intended=Date.UTC(y,m-1,d,hour,minute);
@@ -35,8 +35,8 @@ function centralToUtcISO(day,time){
  return new Date(stamp).toISOString();
 }
 function dateAtUtc(day){const [y,m,d]=day.split('-').map(Number);return new Date(Date.UTC(y,m-1,d))}
-function shiftDays(day,delta){const d=dateAtUtc(day);d.setUTCDate(d.getUTCDate()+delta);return d.toISOString().slice(0,10)}
-function startOfWeek(day){const dayOfWeek=dateAtUtc(day).getUTCDay();return shiftDays(day,-dayOfWeek)}
+export function shiftDays(day,delta){const d=dateAtUtc(day);d.setUTCDate(d.getUTCDate()+delta);return d.toISOString().slice(0,10)}
+export function startOfWeek(day){const dayOfWeek=dateAtUtc(day).getUTCDay();return shiftDays(day,-dayOfWeek)}
 function htmlButton(title,callback,style='secondary'){
  const b=document.createElement('button');b.type='button';b.className=style;b.textContent=title;b.onclick=callback;return b;
 }
