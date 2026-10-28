@@ -73,7 +73,9 @@ form.addEventListener('submit',async e=>{
     email:String(f.get('email')||'').trim()||null,
     service_text:String(f.get('service_text')||'').trim(),
     preferred_date:String(f.get('preferred_date')||'')||null,
-    details:String(f.get('details')||'').trim()||null
+    details:String(f.get('details')||'').trim()||null,
+    sms_service_opt_in:f.get('sms_service_opt_in')==='on',
+    sms_review_opt_in:f.get('sms_review_opt_in')==='on'
   };
   if(data.name.length<2 || data.phone.length<7 || !data.service_text){status.textContent='Please enter your name, phone number and service.';return;}
   btn.disabled=true;status.textContent='Sending your request…';
