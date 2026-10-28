@@ -1,7 +1,7 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {supabaseUrl,supabasePublishableKey} from './supabase-config.js';
 import {optimizePhoto,displayBytes} from './photo-tools.js';
-import {initCalendar} from './calendar.js';
+import {initCalendar} from './calendar.js?v=optional-calendar-20261027';
 import {initMessaging} from './messaging.js';
 const db=createClient(supabaseUrl,supabasePublishableKey);
 const $=id=>document.getElementById(id);
