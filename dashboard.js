@@ -1,9 +1,12 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {supabaseUrl,supabasePublishableKey} from './supabase-config.js';
 import {optimizePhoto,displayBytes} from './photo-tools.js';
+import {initCalendar} from './calendar.js';
+import {initMessaging} from './messaging.js';
 const db=createClient(supabaseUrl,supabasePublishableKey);
 const $=id=>document.getElementById(id);
 let services=[],customers=[],jobs=[],leads=[],photos=[],paymentRequests=[],settings=null,staff=false,pendingCommand=null;
+let calendar,messaging;
 const say=message=>{$('status').textContent=message};
 const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value)||0);
 function el(tag,txt,cls){const e=document.createElement(tag);if(txt!=null)e.textContent=txt;if(cls)e.className=cls;return e;}
@@ -86,6 +89,8 @@ async function refreshAll(){
      ['Mark completed',()=>update('jobs',j.id,{status:'completed'}),'secondary'],
      ['Edit quote',()=>editJobPrice(j),'secondary'],
      ['Record cash / offline',()=>editJob(j),'secondary'],
+    ['Send Text',()=>messaging?.openForJob(j),'secondary'],
+    ['Calendar',()=>{showTab('calendar');if(j.scheduled_for)calendar?.editJob(j);else say('Add a scheduled time for this job to appear on the calendar.');},'secondary'],
    ];
    if(j.price!==null&&outstanding>=0.50&&j.status!=='cancelled')
      actions.push(['Create Stripe link',()=>createStripeCheckout(j),'secondary']);
@@ -109,7 +114,7 @@ async function refreshAll(){
    const actions=[];
    if(payment.status==='open' && payment.checkout_url && (!payment.expires_at||new Date(payment.expires_at)>new Date())){
      actions.push(['Copy link',()=>copyLink(payment.checkout_url),'secondary']);
-     actions.push(['Text link',()=>textPaymentLink(c,payment.checkout_url,payment.amount_cents),'secondary']);
+     if(j)actions.push(['Text link',()=>messaging?.openForJob(j,['payment']),'secondary']);
      actions.push(['Email link',()=>emailPaymentLink(c,payment.checkout_url,payment.amount_cents),'secondary']);
    }
    listRow(paymentsEl,(c?.name||'Customer')+' · '+money(payment.amount_cents/100),
@@ -119,13 +124,19 @@ async function refreshAll(){
       actions);
  }
  const customerEl=$('customerList');customerEl.replaceChildren();
- for(const c of customers)listRow(customerEl,c.name,(c.phone||'')+' · '+(c.email||'')+' · '+(c.address||''),[['Edit',()=>editCustomer(c),'secondary']]);
+ for(const c of customers)listRow(customerEl,c.name,
+   (c.phone||'')+' · '+(c.email||'')+' · '+(c.address||'')+
+   ' · Service texts: '+(c.sms_opt_out_at?'STOP':c.sms_service_opt_in_at?'Allowed':'No consent')+
+   ' · Review invitations: '+(c.sms_opt_out_at?'STOP':c.sms_review_opt_in_at?'Allowed':'No consent'),
+   [['Edit',()=>editCustomer(c),'secondary'],['Text preferences',()=>messaging?.openConsent(c),'secondary']]);
  const serviceEl=$('serviceList');serviceEl.replaceChildren();
  for(const s of services)listRow(serviceEl,s.title,s.description+' · '+(s.price_from==null?'Custom quote':'From '+money(s.price_from))+' · '+(s.visible?'Published':'Hidden'),
  [['Edit',()=>editService(s),'secondary'],[s.visible?'Hide':'Publish',()=>update('services',s.id,{visible:!s.visible}),'secondary']]);
  const photoEl=$('photoList');photoEl.replaceChildren();
  for(const photo of photos){const url=db.storage.from('coles-gallery').getPublicUrl(photo.image_path).data.publicUrl;const row=el('div',null,'item'),img=el('img');img.src=url;img.alt=photo.caption||'Detailing photograph';img.className='thumbnail';row.append(img,el('strong',photo.caption||'Photo'));const b=el('button',photo.visible?'Hide photo':'Publish photo','secondary');b.onclick=()=>update('gallery',photo.id,{visible:!photo.visible});row.append(b);photoEl.append(row);}
  if(settings){const f=$('settingsForm');for(const [k,v] of Object.entries(settings)){if(f.elements[k])f.elements[k].value=v??'';}}
+ calendar?.render();
+ messaging?.refresh();
 }
 function renderSubmissions(){
  const req=$('requestList');req.replaceChildren();
@@ -139,12 +150,23 @@ function renderSubmissions(){
   meta.append(el('span','Submitted: '+submitted+' (Central) · Status: '+lead.status),el('br'));
   const phone=el('a',lead.phone);phone.href='tel:'+lead.phone.replace(/[^+\d]/g,'');meta.append(phone);
   if(lead.email){const email=el('a',lead.email);email.href='mailto:'+encodeURIComponent(lead.email);meta.append(document.createTextNode(' · '),email);}
-  meta.append(el('br'),el('span','Preferred date: '+(lead.preferred_date||'Flexible')));
+  meta.append(el('br'),el('span','Preferred date: '+(lead.preferred_date||'Flexible')),
+    el('br'),el('span','Service text permission: '+(lead.sms_service_opt_in?'Yes':'Not recorded')+
+    ' · Review invitation permission: '+(lead.sms_review_opt_in?'Yes':'Not recorded')));
   row.append(meta,el('p',lead.details||'No additional message.','submission-message'));
   for(const [label,handler] of [
    ['Mark contacted',()=>update('leads',lead.id,{status:'contacted'})],
    ['Mark quoted',()=>update('leads',lead.id,{status:'quoted'})],
-   ['Create customer',async()=>{if(await insert('customers',{name:lead.name,phone:lead.phone,email:lead.email}))showTab('customers')}],
+   ['Create customer',async()=>{
+     const consent=lead.sms_service_opt_in||lead.sms_review_opt_in;
+     const record={
+       name:lead.name,phone:lead.phone,email:lead.email,
+       sms_service_opt_in_at:lead.sms_service_opt_in?lead.created_at:null,
+       sms_review_opt_in_at:lead.sms_review_opt_in?lead.created_at:null,
+       sms_consent_note:consent?'Website inquiry checkbox submitted on '+new Date(lead.created_at).toLocaleString('en-US',{timeZone:'America/Chicago'}):null
+     };
+     if(await insert('customers',record))showTab('customers');
+   }],
   ]){const button=el('button',label,'secondary');button.type='button';button.onclick=handler;row.append(button);}
   const delivery=el('p','Email and text alerts: checking status…','muted');delivery.id='alerts-'+lead.id;row.append(delivery);
   req.append(row);
@@ -167,7 +189,22 @@ async function insert(table,payload){
 }
 async function update(table,id,payload){const {error}=await db.from(table).update(payload).eq('id',id);if(error){say('Could not update: '+error.message);return false}say('Updated.');await refreshAll();return true;}
 const fields=form=>Object.fromEntries(new FormData(form));
-$('customerForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);if(await insert('customers',{name:d.name.trim(),phone:d.phone||null,email:d.email||null,address:d.address||null,notes:d.notes||null}))e.target.reset()};
+$('customerForm').onsubmit=async e=>{
+  e.preventDefault();
+  const d=fields(e.target);
+  const service=Boolean(d.sms_service_opt_in),review=Boolean(d.sms_review_opt_in);
+  const note=String(d.sms_consent_note||'').trim();
+  if((service||review)&&!note){say('Record how the customer explicitly consented to receive text messages.');return;}
+  const time=new Date().toISOString();
+  const payload={
+    name:d.name.trim(),phone:d.phone||null,email:d.email||null,
+    address:d.address||null,notes:d.notes||null,
+    sms_service_opt_in_at:service?time:null,
+    sms_review_opt_in_at:review?time:null,
+    sms_consent_note:note||null
+  };
+  if(await insert('customers',payload))e.target.reset();
+};
 $('jobForm').onsubmit=async e=>{e.preventDefault();const d=fields(e.target);if(!d.customer_id){say('Select a customer first.');return}
  const payload={customer_id:d.customer_id,service_id:d.service_id||null,service_description:d.service_description||null,scheduled_for:d.scheduled_for?new Date(d.scheduled_for).toISOString():null,price:d.price||null,amount_paid:d.amount_paid||0,payment_method:d.payment_method||null,recurring_interval_days:d.recurring_interval_days||null,status:d.status};
  if(await insert('jobs',payload))e.target.reset();
@@ -326,6 +363,14 @@ $('mic').onclick=()=>{
  if(!SR){say('Voice transcription is not supported in this browser. Please type your command.');return;}
  const recognition=new SR();recognition.lang='en-US';recognition.interimResults=false;recognition.onresult=e=>{$('command').value=e.results[0][0].transcript;say('Voice captured. Click Review command to confirm.')};recognition.onerror=e=>say('Microphone error: '+e.error);recognition.start();
 };
+messaging=initMessaging({
+ db,getJobs:()=>jobs,getCustomers:()=>customers,getPayments:()=>paymentRequests,
+ getSettings:()=>settings,refreshAll,say
+});
+calendar=initCalendar({
+ db,getJobs:()=>jobs,getCustomers:()=>customers,getServices:()=>services,
+ refreshAll,openComposer:(job)=>messaging.openForJob(job),say
+});
 db.auth.onAuthStateChange(()=>{setTimeout(()=>refreshSession().catch(e=>console.error(e)),0)});
 refreshSession().catch(()=>{$('login').classList.remove('hidden');$('office').classList.add('hidden')});
 
