@@ -36,6 +36,23 @@ $('loginForm').onsubmit=async ev=>{
  if(!staff){await db.auth.signOut();alert('This user is not authorized to manage the business. Ask the administrator to add it to staff_users.')}
 };
 $('refreshRequests').onclick=()=>refreshAll().catch(()=>say('Could not refresh submissions. Please try again.'));
+$('forgotPassword').onclick=async()=>{
+ const email=String($('loginForm').elements.email.value||'').trim();
+ const status=$('recoveryStatus');
+ if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+   status.textContent="Enter the email address for your account above, then click Forgot password.";
+   $('loginForm').elements.email.focus();
+   return;
+ }
+ $('forgotPassword').disabled=true;
+ status.textContent='Requesting a reset email…';
+ try{
+   const {error}=await db.auth.resetPasswordForEmail(email,{redirectTo:'https://colesautodetailingtexas.com/reset-password.html'});
+   status.textContent=error?'Could not request reset: '+error.message:
+     'If this email belongs to a login, a password-reset email has been requested. Check Inbox and Spam.';
+ }catch(err){console.error(err);status.textContent='Could not request a reset. Please try again later.';}
+ finally{$('forgotPassword').disabled=false;}
+};
 $('signout').onclick=async()=>{await db.auth.signOut();staff=false;await refreshSession()};
 async function refreshAll(){
  if(!staff)return;
