@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { showGoogleReviews } from './google-reviews.js';
 import { supabaseUrl, supabasePublishableKey } from './supabase-config.js';
 
 const db = createClient(supabaseUrl, supabasePublishableKey);
@@ -44,6 +45,10 @@ async function loadPublicData(){
     const paymentButton=$('paymentLink'); if(paymentButton)paymentButton.href='tel:'+phoneDigits;
     const review=$('googleReviewLink');
     if(b.google_review_url){review.href=b.google_review_url;review.hidden=false;}
+    if(b.google_place_id && b.google_maps_browser_key){
+      // Official Google UI handles the live review feed and source attribution.
+      void showGoogleReviews({placeId:b.google_place_id,browserKey:b.google_maps_browser_key});
+    }
   }
   if(servicesResult.data)renderServices(servicesResult.data);
   if(photosResult.data && photosResult.data.length){
