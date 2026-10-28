@@ -82,11 +82,11 @@ function saveIcs(entry,customer,title){
  a.href=url;a.download='coles-calendar-'+d+'.ics';
  document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
 }
-function entryDate(e){
+export function entryDate(e){
  if(e.kind==='event')return e.event_date||null;
  return e.calendar_date||(e.scheduled_for?dayKey(new Date(e.scheduled_for)):null);
 }
-function entryStart(e){
+export function entryStart(e){
  if(e.kind==='event'){
    if(!e.event_date||!e.event_time)return null;
    try{return new Date(centralToUtcISO(e.event_date,String(e.event_time).slice(0,5)));}
