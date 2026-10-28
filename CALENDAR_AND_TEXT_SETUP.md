@@ -4,10 +4,10 @@
 
 Open https://colesautodetailingtexas.com/dashboard.html and choose **Calendar**.
 
-- Month and week views display job appointments in America/Chicago (Central) time.
-- Click any day, select customer and service, enter start time, duration, custom price and notes; click Schedule job.
+- Month and week views display customer jobs and general events in America/Chicago (Central) time.
+- Click any day and choose **Customer job** or **General event / personal reminder**. There are no required form inputs: empty date uses the selected day; empty time creates an all-day entry; blank title becomes Job or Event. A customer, service, duration, price and notes are optional.
 - Edit an appointment, mark it completed, or download an ICS calendar invitation with a reminder alarm for Parker's own calendar.
-- Choose a reminder 30 minutes, 1 or 2 hours, or 1 or 2 days before a visit. The dashboard shows reminders that are due, with a button to mark handled **manually**.
+- Choose a reminder 30 minutes, 1 or 2 hours, or 1 or 2 days ahead. All-day entries use 9:00 AM Central as their reminder anchor; timed entries use the scheduled start. Dashboard reminders must be marked handled **manually**.
 - For repeat customers, choose weekly, biweekly, 30-day, 60-day or 90-day intervals and click Schedule next visit after a completed appointment. New visits require confirmation; no automatic charge or unlimited repeating booking is created.
 - Appointments are stored on the existing jobs records in Supabase; no duplicate booking database.
 
