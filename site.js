@@ -33,11 +33,15 @@ function renderServices(services){
   const other=document.createElement('option');other.value='Other';other.textContent='Other / request a custom quote';select.append(other);
 }
 async function loadPublicData(){
-  const [settingsResult, servicesResult, photosResult]=await Promise.all([
+  const [settingsResult, servicesResult, photosResult, copyResult, themeResult]=await Promise.all([
     db.from('business_settings').select('*').eq('id',true).maybeSingle(),
     db.from('services').select('title,description,price_from,sort_order').eq('visible',true).order('sort_order'),
     db.from('gallery').select('image_path,caption,sort_order').eq('visible',true).order('sort_order'),
+    db.from('site_copy').select('copy_key,content'),
+    db.from('site_theme').select('theme_key,value'),
   ]);
+  if(copyResult.data)for(const {copy_key,content} of copyResult.data){const e=document.querySelector('[data-site-copy="'+copy_key+'"]');if(!e)continue;if(['services_title','contact_title'].includes(copy_key)){e.replaceChildren();const lines=String(content).split('|');lines.forEach((line,i)=>{if(i)e.append(document.createElement('br'));e.append(document.createTextNode(line));});}else e.textContent=content;}
+  if(themeResult.data){const properties={accent:'--a',background:'--bg',foreground:'--fg'};for(const t of themeResult.data)if(properties[t.theme_key]&&/^#[0-9a-f]{6}$/i.test(t.value))document.documentElement.style.setProperty(properties[t.theme_key],t.value);}
   if(settingsResult.data){
     const b=settingsResult.data;
     const phoneDigits=String(b.phone||'(832) 877-5556').replace(/[^+\d]/g,'');
