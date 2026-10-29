@@ -349,29 +349,89 @@ function emailPaymentLink(c,link,cents){
  window.location.href='mailto:'+encodeURIComponent(c?.email||'')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
  say('An email draft opened. Please send it from your email app.');
 }
-function proposeCommand(text){
- let m;
- if((m=/^add service\s+(.+)$/i.exec(text)))return {description:'Add a new service named "'+m[1]+'" to the website.',run:()=>insert('services',{title:m[1].slice(0,100),description:'',sort_order:services.length*10+10})};
- if((m=/^change phone to\s+([+\d\s().-]{7,30})$/i.exec(text)))return {description:'Update the public website phone number to '+m[1]+'.',run:async()=>{const {error}=await db.from('business_settings').update({phone:m[1]}).eq('id',true);if(error){say(error.message);return;}say('Phone updated.');await refreshAll();}};
- if(/^show (requests|leads)$/i.test(text))return {description:'Open customer requests (no data changed).',run:async()=>showTab('requests')};
- return null;
+let aiPending=null;
+const aiHistory=[];
+const aiChat=$('aiChat');
+function addAiMessage(role,content){const p=el('div',content,'ai-bubble ai-'+role);aiChat.append(p);aiChat.scrollTop=aiChat.scrollHeight;}
+function describeAiAction(a){
+ if(a.type==='update_setting')return 'Change website setting '+a.field+' to: '+a.value;
+ if(a.type==='update_copy')return 'Update homepage '+a.key+' to: '+a.value;
+ if(a.type==='update_theme')return 'Set website '+a.key+' color to '+a.value;
+ if(a.type==='add_service')return 'Add service: '+a.title+' — '+(a.description||'')+' (starting price: '+(a.price_from==null?'custom quote':money(a.price_from))+')';
+ if(a.type==='update_service')return 'Update service '+(services.find(s=>s.id===a.id)?.title||a.id)+': '+JSON.stringify(a.changes);
+ if(a.type==='update_gallery')return 'Update photo: '+JSON.stringify(a.changes);
+ return 'Unknown change';
 }
-$('interpret').onclick=()=>{const value=$('command').value.trim();pendingCommand=proposeCommand(value);const box=$('commandReview');box.classList.remove('hidden');if(pendingCommand){$('commandExplanation').textContent=pendingCommand.description;$('confirmCommand').disabled=false;}else{$('commandExplanation').textContent='I cannot safely interpret that request yet. Use the forms and tabs to edit jobs, pricing, and photos. Supported examples are shown above.';$('confirmCommand').disabled=true;}};
-$('confirmCommand').onclick=async()=>{if(!pendingCommand)return;const action=pendingCommand;pendingCommand=null;$('commandReview').classList.add('hidden');await action.run();$('command').value='';};
-$('cancelCommand').onclick=()=>{pendingCommand=null;$('commandReview').classList.add('hidden');};
-$('mic').onclick=()=>{
- const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){say('Voice transcription is not supported in this browser. Please type your command.');return;}
- const recognition=new SR();recognition.lang='en-US';recognition.interimResults=false;recognition.onresult=e=>{$('command').value=e.results[0][0].transcript;say('Voice captured. Click Review command to confirm.')};recognition.onerror=e=>say('Microphone error: '+e.error);recognition.start();
+async function applyAiAction(a){
+ let table=null,query=null;
+ if(a.type==='update_setting'){
+  if(!['business_name','tagline','phone','service_area','google_review_url'].includes(a.field)||typeof a.value!=='string')throw Error('Invalid website setting.');
+  table='business_settings';query=db.from(table).update({[a.field]:a.value,updated_at:new Date().toISOString()}).eq('id',true).select('id');
+ }else if(a.type==='update_copy'){
+  if(!['hero_eyebrow','hero_intro','services_title','gallery_title','payments_title','reviews_title','contact_title','contact_intro'].includes(a.key)||typeof a.value!=='string'||a.value.length<1||a.value.length>1500)throw Error('Invalid homepage text.');
+  table='site_copy';query=db.from(table).update({content:a.value,updated_at:new Date().toISOString()}).eq('copy_key',a.key).select('copy_key');
+ }else if(a.type==='update_theme'){
+  if(!['accent','background','foreground'].includes(a.key)||!/^#[0-9a-f]{6}$/i.test(a.value))throw Error('Invalid website color.');
+  table='site_theme';query=db.from(table).update({value:a.value,updated_at:new Date().toISOString()}).eq('theme_key',a.key).select('theme_key');
+ }else if(a.type==='add_service'){
+  if(typeof a.title!=='string'||a.title.trim().length<2||a.title.length>100)throw Error('Invalid service title.');
+  const price=a.price_from==null?null:Number(a.price_from);
+  if(price!==null&&(!Number.isFinite(price)||price<0))throw Error('Invalid service price.');
+  table='services';query=db.from(table).insert({title:a.title.trim(),description:String(a.description||'').slice(0,1000),price_from:price,sort_order:services.length*10+10}).select('id');
+ }else if(a.type==='update_service'){
+  const s=services.find(s=>s.id===a.id);if(!s)throw Error('Service not found.');
+  const changes={};for(const field of ['title','description','price_from','visible'])if(Object.hasOwn(a.changes||{},field))changes[field]=a.changes[field];
+  if(!Object.keys(changes).length)throw Error('No changes to apply.');
+  if(changes.title!==undefined&&(typeof changes.title!=='string'||changes.title.trim().length<2||changes.title.length>100))throw Error('Invalid service title.');
+  if(changes.price_from!==undefined&&changes.price_from!==null&&(!Number.isFinite(Number(changes.price_from))||Number(changes.price_from)<0))throw Error('Invalid price.');
+  table='services';query=db.from(table).update(changes).eq('id',a.id).select('id');
+ }else if(a.type==='update_gallery'){
+  if(!photos.some(p=>p.id===a.id))throw Error('Photo not found.');
+  const changes={};for(const field of ['caption','visible'])if(Object.hasOwn(a.changes||{},field))changes[field]=a.changes[field];
+  if(!Object.keys(changes).length)throw Error('No changes to apply.');
+  table='gallery';query=db.from(table).update(changes).eq('id',a.id).select('id');
+ }else throw Error('This action is not supported.');
+ const {data,error}=await query;
+ if(error)throw error;
+ if(!data?.length)throw Error('No website record was changed. Please refresh and try again.');
+}
+$('aiChatForm').onsubmit=async e=>{
+ e.preventDefault();
+ const input=$('aiInput');const message=input.value.trim();
+ if(!message||!staff)return;
+ $('aiSend').disabled=true;$('aiStatus').textContent='Thinking…';
+ aiPending=null;$('aiProposal').classList.add('hidden');
+ addAiMessage('user',message);input.value='';
+ try{
+  const {data,error}=await db.functions.invoke('website-ai-assistant',{body:{message,history:aiHistory}});
+  if(error)throw new Error(data?.error||'Could not contact the AI server. Check whether OpenAI API is configured.');
+  if(data?.error)throw new Error(data.error);
+  const reply=String(data?.reply||'Please try asking another way.');
+  addAiMessage('assistant',reply);
+  aiHistory.push({role:'user',content:message},{role:'assistant',content:reply});
+  if(aiHistory.length>12)aiHistory.splice(0,aiHistory.length-12);
+  if(data.action){aiPending=data.action;$('aiProposalText').textContent=describeAiAction(data.action);$('aiProposal').classList.remove('hidden');}
+  $('aiStatus').textContent=data.action?'Review the change and choose Approve and publish.':'Ready.';
+ }catch(err){addAiMessage('assistant',err.message);$('aiStatus').textContent='AI request failed.';}
+ finally{$('aiSend').disabled=false;}
 };
-messaging=initMessaging({
- db,getJobs:()=>jobs,getCustomers:()=>customers,getPayments:()=>paymentRequests,
- getSettings:()=>settings,refreshAll,say
-});
-calendar=initCalendar({
- db,getJobs:()=>jobs,getEvents:()=>calendarEvents,getCustomers:()=>customers,getServices:()=>services,
- refreshAll,openComposer:(job)=>messaging.openForJob(job),say
-});
-db.auth.onAuthStateChange(()=>{setTimeout(()=>refreshSession().catch(e=>console.error(e)),0)});
-refreshSession().catch(()=>{$('login').classList.remove('hidden');$('office').classList.add('hidden')});
+$('aiApprove').onclick=async()=>{
+ if(!aiPending||!staff)return;
+ const action=aiPending;aiPending=null;
+ $('aiApprove').disabled=true;$('aiStatus').textContent='Publishing your approved change…';
+ try{await applyAiAction(action);$('aiProposal').classList.add('hidden');addAiMessage('assistant','Published! Refresh the public website to see your change.');await refreshAll();$('aiStatus').textContent='Website updated.';}
+ catch(err){addAiMessage('assistant','I could not publish that change: '+err.message);$('aiStatus').textContent='Change not published.';}
+ finally{$('aiApprove').disabled=false;}
+};
+$('aiReject').onclick=()=>{aiPending=null;$('aiProposal').classList.add('hidden');$('aiStatus').textContent='Change canceled.';};
+$('aiMic').onclick=()=>{
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){$('aiStatus').textContent='Speech-to-text is not supported by this browser. Try Chrome or type your request.';return;}
+ const mic=$('aiMic'),recognition=new SR();recognition.lang='en-US';recognition.interimResults=false;
+ recognition.onstart=()=>{mic.disabled=true;mic.textContent='Listening…';$('aiStatus').textContent='Speak your request now.';};
+ recognition.onresult=e=>{$('aiInput').value=e.results[0][0].transcript;$('aiStatus').textContent='Voice captured. Review your words and tap Ask AI.';};
+ recognition.onerror=e=>{$('aiStatus').textContent='Microphone error: '+e.error;};
+ recognition.onend=()=>{mic.disabled=false;mic.textContent='🎙 Speak';};
+ recognition.start();
+};
 
